@@ -1,0 +1,83 @@
+name: Release APK
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+      ORG_GRADLE_PROJECT_releaseStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
+      ORG_GRADLE_PROJECT_releaseKeyAlias: ${{ secrets.ALIAS }}
+      ORG_GRADLE_PROJECT_releaseKeyPassword: ${{ secrets.KEY_PASSWORD }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install build platform and tools
+        run: |
+          sdkmanager=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          "$sdkmanager" "platforms;android-35" "build-tools;36.0.0"
+      - name: Test module behavior and packaging
+        run: python3 -m unittest discover -s tests -v
+      - name: Prepare persistent release signing key
+        run: bash scripts/prepare-signing.sh
+      - name: Build release APK
+        env:
+          ORG_GRADLE_PROJECT_releaseStoreFile: ${{ runner.temp }}/module-signing.jks
+        run: ./gradlew --no-daemon --console=plain :app:assembleRelease
+      - name: Verify APK signature
+        run: |
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs \
+            app/build/outputs/apk/release/app-release.apk
+      - name: Package APK and corresponding source
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk dist/DisablePackageVerificationAgent.apk
+          git archive --format=zip --prefix=DisablePackageVerificationAgent/ \
+            --output=dist/DisablePackageVerificationAgent-source.zip HEAD
+          (cd dist && sha256sum DisablePackageVerificationAgent.apk \
+            DisablePackageVerificationAgent-source.zip > SHA256SUMS)
+      - name: Upload APK and source
+        uses: actions/upload-artifact@v4
+        with:
+          name: DisablePackageVerificationAgent-release
+          path: dist/*
+          if-no-files-found: error
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --verify-tag \
+              --title "$GITHUB_REF_NAME" --generate-notes
+          fi
+      - name: Remove temporary signing key
+        if: always()
+        run: |
+          : "${RUNNER_TEMP:?RUNNER_TEMP is required}"
+          rm -f -- "$RUNNER_TEMP/module-signing.jks"

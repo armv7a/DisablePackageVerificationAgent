@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Disable Package Verification Agent</string>
+    <string name="module_description">Disable installation verification agents such as Play Protect.</string>
+</resources>

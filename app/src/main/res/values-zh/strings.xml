@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">禁用安装包验证代理</string>
+    <string name="module_description">禁用安装包验证代理（如 Play Protect）。</string>
+</resources>

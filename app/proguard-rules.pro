@@ -1,0 +1,2 @@
+-keep class com.example.disableverificationagent.VerificationAgentModule { *; }
+-keepattributes SourceFile,LineNumberTable
